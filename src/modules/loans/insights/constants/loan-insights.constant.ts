@@ -1,0 +1,1 @@
+export const LOAN_INSIGHTS_DISTRICT_LIMIT = 10;

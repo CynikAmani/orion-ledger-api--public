@@ -1,0 +1,236 @@
+================================================================================
+CONTEXT PRIMER — Orion Ledger API (NestJS Multi-Tenant Architecture)
+================================================================================
+
+PROJECT IDENTITY:
+Orion Ledger is an enterprise multi-tenant financial ledger and loan management engine 
+built with NestJS, TypeScript, Prisma, and PostgreSQL. It is a modern architectural 
+refactor and evolution of the legacy Xander Creditors system. When implementing 
+features, reference existing legacy structures while transitioning the codebase to 
+support tenant-scoped isolation, enhanced RBAC, and modular ledger operations.
+
+--------------------------------------------------------------------------------
+1. DUAL SCHEMA ARCHITECTURE & REFACTORING WORKFLOW
+--------------------------------------------------------------------------------
+To preserve codebase stability during incremental refactoring, the project maintains 
+two schema files in the prisma/ directory:
+
+  * prisma/schema.prisma (Active Codebase Schema)
+    The operational schema tied directly to current working code, controllers, and 
+    services. All active CLI operations (npx prisma db push, npx prisma db seed) 
+    execute against this file.
+
+  * prisma/schema.target.prisma.txt (Target Reference Blueprint - Plain Text)
+    The plain-text blueprint for the target multi-tenant model definition. It 
+    specifies future entity models, tenant relationships (tenantId), updated role 
+    models, and isolated domain schemas.
+
+REFACTORING PROTOCOL:
+- Do not overhaul the entire codebase at once.
+- When working on a feature/module refactor, inspect schema.target.prisma.txt for 
+  target model interfaces.
+- Incrementally migrate the relevant models into schema.prisma, update NestJS services 
+  and DTOs to match, and run npx prisma db push to synchronize local development.
+
+--------------------------------------------------------------------------------
+2. POSTGRESQL SECURITY & DUAL-USER CONNECTION MODEL
+--------------------------------------------------------------------------------
+During local development and runtime execution, PostgreSQL operations are strictly 
+separated into two database user roles to ensure security compliance without blocking 
+CLI workflows:
+
+  * Migration Owner (ol_owner / DIRECT_URL)
+    Superuser/Owner account with full DDL rights (CREATE, ALTER, DROP). Used 
+    exclusively by Prisma CLI (db push, migrate, force resets) to alter database 
+    structures without permission errors.
+
+  * Application Runtime (ol_app / DATABASE_URL)
+    Restricted application account with DML rights only (SELECT, INSERT, UPDATE, 
+    DELETE). Used by NestJS at runtime via PrismaClient to enforce least-privilege 
+    CRUD access.
+
+REQUIRED .ENV CONFIGURATION:
+  DIRECT_URL="postgresql://ol_owner:<OWNER_PASSWORD>@localhost:5432/orion_ledger_dev?schema=public"
+  DATABASE_URL="postgresql://ol_app:<APP_PASSWORD>@localhost:5432/orion_ledger_dev?schema=public"
+
+--------------------------------------------------------------------------------
+3. ARCHITECTURE & CODEBASE OVERVIEW
+--------------------------------------------------------------------------------
+- Bootstrap & Routing (@src/main.ts): Global prefix 'api', URI versioning default 
+  'v1' -> routes resolve to /api/v1/... Controllers never include 'api' or 'v1' in 
+  @Controller() paths.
+- Root Module (@src/app.module.ts): ConfigModule (Joi), ThrottlerModule, PrismaModule, 
+  CoreModule, and feature modules. Global ValidationPipe configured with whitelist: true, 
+  forbidNonWhitelisted: true, transform: true.
+- Core Utilities (@src/core/): Enterprise infrastructure concerns (audit, config, 
+  database, email, notifications, schedule, storage). Always reuse core services 
+  instead of creating ad-hoc solutions inside feature modules.
+- Domain Modules (@src/modules/): Domain business logic lands here.
+- Cross-Cutting Helpers (@src/common/): Reserved strictly for filters, interceptors, 
+  exceptions, and core date/currency formatting utilities.
+    * format-currency.util.ts: MWK/Local currency display formatters.
+    * format-date.util.ts: Date display and UTC window helpers (utcDayLabel, 
+      utcMonthLabel, utcDayStart, utcMonthStart, utcMonthWindow, utcYearWindow).
+
+--------------------------------------------------------------------------------
+4. MODULE LAYOUT & AGGREGATE STRUCTURE
+--------------------------------------------------------------------------------
+- Flat Domains: src/modules/<domain>/ (e.g. announcements, districts, roles, repayment-details).
+- Nested Aggregates: Parent modules only import and export child sub-modules; parent 
+  modules do not contain controllers.
+    * content-management/   -> adverts, announcements, brand-showcases
+    * loan-configurations/  -> loan-types, interest-rates, promotions
+    * system-configurations/-> brand-about, brand-details, mfa-settings, online-repayments, notification-configs
+    * users/                -> me, managed-user (shared, platform, tenant), shared
+    * auth/                 -> auth, mfa, password-reset, account-access, shared
+    * roles/                -> shared, platform, tenant  (Role Management)
+
+STANDARD SUBDOMAIN FILE TREE:
+  <sub-domain>/
+    <sub-domain>.module.ts
+    controllers/<name>.controller.ts
+    services/<name>.service.ts
+    dto/create-*.dto.ts | update-*.dto.ts | list-*-query.dto.ts
+    constants/         (domain-owned audit actions and constants)
+    swagger/           (multipart OpenAPI documentation)
+    tasks/             (scheduled background jobs)
+    templates/         (transactional email templates)
+
+--------------------------------------------------------------------------------
+5. PLATFORM VS. TENANT IDENTITY SCOPE
+--------------------------------------------------------------------------------
+- Platform Users (Customers): Customers are global platform entities. They register
+  once on the platform and can take loans or receive special offers across multiple
+  tenants. User.tenantId must NOT be used to identify a customer's institutional
+  context. Tenants do not manage customer roles or maintain isolated customer user
+  tables.
+- Tenant Staff/Admins: Users with a non-null User.tenantId are staff or
+  administrators assigned exclusively to that tenant.
+- Multi-Tenant Interactions: Any tenant-specific activity, including loan activity
+  counters, special offers, and loan applications, must be scoped explicitly via
+  tenantId on the domain model itself. Never infer the operational tenant from a
+  customer's User.tenantId.
+
+- Staff ↔ record tenant assertion (SHARED UTIL — reuse, do not duplicate):
+  Path: @src/modules/loans/shared/utils/assert-staff-tenant-record.util.ts
+    * assertStaffTenantMatchesRecord(callerTenantId, recordTenantId, message?)
+      Compare resolveCallerTenantId(staff) to a domain row's tenantId
+      (Loan, LoanApplication, etc.). Mismatch → NotFoundException (no cross-tenant
+      existence leak). Use on every staff read/mutate of a tenant-owned record.
+    * assertLoanTypeBelongsToTenant(loanTypeTenantId, targetTenantId)
+      Before issuing/creating a loan, assert LoanType.tenantId === target tenant.
+      Mismatch → BadRequestException.
+  Controllers resolve membership via resolveCallerTenantId; services assert the
+  loaded record (or related loan type) matches. Do not re-implement these checks
+  inline in new modules — import the util.
+
+--------------------------------------------------------------------------------
+6. AUTH, RBAC & MULTI-TENANT ROLE ISOLATION
+--------------------------------------------------------------------------------
+- Permission Catalog: Located in @src/modules/auth/shared/constants/permissions.constant.ts.
+  The catalog is migrated incrementally (module by module). Do not rewrite the entire
+  catalog in one pass. When touching a module, replace that module's permission strings
+  to the two-category prefix contract below; leave unrelated modules on legacy strings
+  until they are covered.
+
+- TWO-CATEGORY PERMISSION PREFIX (MANDATORY — NestJS + Web App):
+  Every permission string belongs to exactly one execution domain, encoded as the
+  first segment of the name. NestJS (@Permission / PermissionGuard) and the web app
+  (nav, feature flags, button/route gates) MUST use this same prefix as the first
+  verification layer before any finer action check:
+
+    * platform:<action>  — Platform Role Management catalog. Includes:
+        (a) platform infrastructure (tenants, global IAM, platform config),
+        (b) customer self-service under platform:customer:* (singular — apply,
+            own loans/applications/repayments/offers/dashboard/support), and
+        (c) ops on platform Customer accounts under platform:customers:* (plural —
+            directory, identity, eligibility, loan activity). Customers are
+            platform users; never put Customer-entity permissions under tenant:*.
+      Domain rows may still carry tenantId — the prefix is the permission domain
+      (and FE branch), not where every related row lives.
+      Examples: platform:tenants:manage, platform:customer:applications:create,
+      platform:customer:loans:self-read, platform:customers:read.
+
+    * tenant:<action>    — Tenant Role Management catalog. Institution staff admin
+      only (approve/decline applications, issue loans, record repayments, portfolio).
+      Do NOT put Customer-entity or customer self-service under tenant:*.
+      Tenant Role Management may additionally assign platform:customers:* so staff
+      can serve platform customers.
+      Examples: tenant:applications:approve, tenant:loans:read, tenant:repayments:create,
+      tenant:users:read.
+
+  Actor split on shared entities (applications, loans, repayments): customer verbs
+  → platform:customer:*; staff administrative verbs → tenant:*. Never grant the
+  full entity catalog under only one prefix. Do not mix legacy platform:<entity>
+  customer strings with platform:customer:<entity>.
+
+  Tenant overlap onto platform Customer domain (optional pattern):
+    * tenant:platform:<resource>:<action> — tenant Role Management strings that
+      authorize read/use of platform-domain customer data without granting
+      platform User Management (platform:users:*). Example:
+      tenant:platform:users:read → GET /users/:userId/profile (application review).
+    * platform:customers:* remains the customer-ops catalog (also assignable on
+      tenant roles via Role Management exception). Prefer the clearer verb for
+      each UI surface; do not invent a third top-level prefix.
+
+  Prefix is the scope gate; the remainder is the atomic action. A caller with
+  tenant:loans:read must not be treated as authorized for platform:tenants:read,
+  and vice versa. Do not invent a third prefix. Do not omit the prefix on new
+  strings. JWT payloads never contain permissions — live Postgres remains the
+  source of truth; the prefix lives on the stored permission name.
+
+- NO GENERIC PERMISSIONS (EXPLICIT ROUTE OPERATIONS ONLY):
+  Never define broad catch-all permissions like 'entity:manage' or '<scope>:<entity>:manage'.
+  All permissions must map explicitly to granular route operations (view, read, create,
+  update, delete, or domain-specific verbs like approve, decline, cancel, assign) so that
+  different users and roles can have precise, distinct levels of control.
+
+- Guards & Decorators: @Public(), @Permission(PERMISSIONS.X.Y) under auth/shared/decorators/.
+  JwtAuthGuard and PermissionGuard are globally bound in CoreModule.
+  PermissionGuard checks the live DB permission list for an exact string match.
+  There is no Super Admin / identity bypass — a platform root account is allowed
+  because its role is granted the required platform:* (and, if needed, tenant:*)
+  permissions in the database, not because the guard skips the check.
+
+- Role Scoping (Platform vs. Tenant) — aligns with the permission prefix:
+    * Roles with tenantId == NULL are Platform-Level Roles (e.g. Platform Super Admin,
+      Global Auditor). They receive platform:* permissions.
+    * Roles with a populated tenantId are Tenant-Scoped Roles (e.g. Tenant Manager,
+      Branch Loan Officer). They receive tenant:* permissions for that tenant only.
+- Tenant membership: User.tenantId (NULL = platform; populated = that tenant only).
+  Same shape as Role.tenantId. Do not infer membership from UserRole. Platform User
+  Management lists tenantId IS NULL; tenant User Management lists the caller's tenantId.
+  Caller with no tenantId receives 403 membership required. isBlocked is an operational
+  hold (loans/approvals) and does not lock login; deletedAt revokes access until restore.
+
+--------------------------------------------------------------------------------
+7. AUDIT LOGGING & OPERATIONAL SAFETY
+--------------------------------------------------------------------------------
+- Audit Emission: Done exclusively via AuditEmitterService (@src/core/audit/services/audit-emitter.service.ts). 
+  Services do not create AuditLog rows manually.
+- Audit Context Helpers:
+    * extractAuditRequestContext(request) for authenticated user mutations.
+    * extractPublicAuditRequestContext(request) for unauthenticated/guest lookups.
+    * SYSTEM_SCHEDULER_AUDIT_CONTEXT for cron and background tasks.
+- Storage Engine: ImageStorageService (@src/core/storage/) manages file persistence. 
+  Files are saved under public/{UPLOAD_DIRS}/... Any new public directory added to 
+  UPLOAD_DIRS must have a corresponding entry in PUBLIC_STATIC_MOUNTS.
+
+--------------------------------------------------------------------------------
+8. DEVELOPMENT & DATABASE EXECUTION CHECKLIST
+--------------------------------------------------------------------------------
+1. Do not create or commit Prisma migration scripts unless explicitly requested. Dev 
+   workflow relies on npx prisma db push or npm run db:reset.
+2. Always cross-reference target specifications: When building or updating domain 
+   services, verify data models against schema.target.prisma.txt to align column 
+   names and tenant references.
+3. Services return interface shapes: Define an exported Response interface and SELECT 
+   constant (using 'as const') in domain services.
+4. Thin Controllers: Controllers only handle authorization, query/body parsing, audit 
+   context extraction, and service delegation. Domain services own business execution, 
+   Prisma queries, storage management, and audit emissions.
+5. Permission strings for a module being refactored MUST use the platform: or tenant:
+   prefix (see section 5) and be explicitly mapped to route operations (view, read, create,
+   update, delete). Do NOT introduce generic ':manage' permissions. Leave other modules'
+   legacy permission strings unchanged until those modules are covered.
+================================================================================

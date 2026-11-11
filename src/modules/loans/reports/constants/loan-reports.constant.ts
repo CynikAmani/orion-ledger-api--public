@@ -1,0 +1,4 @@
+export const LOAN_REPORTS_BORROWER_LEADERBOARD_LIMIT = {
+  DEFAULT: 5,
+  MAX: 20,
+} as const;

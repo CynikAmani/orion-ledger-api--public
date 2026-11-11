@@ -1,0 +1,3 @@
+export const REPAYMENT_AUDIT_ACTIONS = {
+  RECORDED: 'REPAYMENT_RECORDED',
+} as const;

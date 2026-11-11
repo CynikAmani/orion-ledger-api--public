@@ -1,0 +1,1120 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Prisma 7: connection URLs are not allowed here.
+// CLI (db push / seed orchestration) uses DIRECT_URL (ol_owner) in prisma.config.ts.
+// NestJS runtime uses DATABASE_URL (ol_app) in PrismaService.
+datasource db {
+  provider = "postgresql"
+}
+
+model About {
+  id            Int     @id @default(autoincrement())
+  brandMission  String? @map("brand_mission") @db.VarChar(1000)
+  brandVision   String? @map("brand_vision") @db.VarChar(1000)
+  contactPhone  String? @map("contact_phone") @db.VarChar(20)
+  whatsappPhone String? @map("whatsapp_phone") @db.VarChar(20)
+  contactEmail  String? @map("contact_email") @db.VarChar(256)
+  coreValues    String? @map("core_values") @db.VarChar(800)
+
+  @@map("about")
+}
+
+model Advert {
+  id        Int             @id @default(autoincrement())
+  tenantId  String          @map("tenant_id") @db.VarChar(100)
+  title     String          @db.VarChar(255)
+  content   String          @db.Text
+  imageUrl  String?         @map("image_url") @db.VarChar(255)
+  placement AdvertPlacement @default(ALL)
+  status    AdvertStatus    @default(DRAFT)
+  endDate   DateTime?       @map("end_date") @db.Timestamp(0)
+  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt DateTime        @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  tenant Tenant @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+
+  @@unique([id, tenantId], map: "uq_adverts_id_tenant")
+  @@index([tenantId], map: "idx_adverts_tenant")
+  @@map("adverts")
+}
+
+model IdentityDocument {
+  id                      Int     @id @default(autoincrement())
+  userId                  Int     @map("user_id")
+  /// Scan of National ID, passport, or driver's licence. Column name is legacy.
+  identityDocumentImgName String? @map("national_id_img_name") @db.VarChar(300)
+  signatureData           Bytes?  @map("signature_data") @db.ByteA
+  users                   User    @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "identity_documents_user_id_fkey")
+
+  @@index([userId], map: "idx_identity_documents_user_id")
+  @@map("identity_documents")
+}
+
+model SavingsApplicationActivity {
+  activityId                  Int       @id @default(autoincrement()) @map("activity_id")
+  customerId                  Int       @unique(map: "uq_application_activity_customer_id") @map("customer_id")
+  lastApplicationDate         DateTime? @map("last_application_date") @db.Timestamp(0)
+  lastApprovedApplicationDate DateTime? @map("last_approved_application_date") @db.Timestamp(0)
+  numApplications             Int?      @default(0) @map("num_applications")
+  users                       User      @relation(fields: [customerId], references: [id], onDelete: Cascade, map: "savings_application_activity_ibfk_1")
+
+  @@map("savings_application_activity")
+}
+
+model BrandShowcase {
+  id          Int           @id @default(autoincrement())
+  tenantId    String        @map("tenant_id") @db.VarChar(100)
+  title       String        @db.VarChar(255)
+  description String?       @db.Text
+  imageUrl    String?       @map("image_url") @db.VarChar(255)
+  category    AssetCategory
+  isPublished Boolean       @default(false) @map("is_published")
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  tenant Tenant @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+
+  @@unique([id, tenantId], map: "uq_brand_showcases_id_tenant")
+  @@index([tenantId], map: "idx_brand_showcases_tenant")
+  @@map("brand_showcases")
+}
+
+model District {
+  id           Int    @id @default(autoincrement())
+  districtName String @map("district_name") @db.VarChar(64)
+  users        User[]
+
+  @@map("districts")
+}
+
+model TicketCategory {
+  id          Int                  @id @default(autoincrement())
+  key         String               @unique @db.VarChar(50)
+  name        String               @db.VarChar(100)
+  description String?              @db.Text
+  /// PLATFORM = contact Orion; TENANT = contact a specific institution.
+  scope       TicketCategoryScope  @default(PLATFORM)
+  isActive    Boolean              @default(true) @map("is_active")
+  createdAt   DateTime             @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt   DateTime             @updatedAt @map("updated_at") @db.Timestamp(0)
+  tickets     SupportTicket[]
+
+  @@index([scope], map: "idx_ticket_categories_scope")
+  @@map("ticket_categories")
+}
+
+model SupportTicket {
+  id                     Int                   @id @default(autoincrement())
+  ticketNumber           String                @unique @map("ticket_number") @db.VarChar(20)
+  userId                 Int                   @map("user_id")
+  /// NULL = platform-level ticket; set = institution-targeted ticket.
+  tenantId               String?               @map("tenant_id") @db.VarChar(100)
+  /// Optional loan context (internal Loan.loanId FK).
+  loanId                 String?               @map("loan_id") @db.VarChar(100)
+  /// Optional open application context.
+  loanApplicationId      Int?                  @map("loan_application_id")
+  categoryId             Int                   @map("category_id")
+  status                 SupportTicketStatus   @default(OPEN)
+  priority               SupportTicketPriority @default(NORMAL)
+  handlerId              Int?                  @map("handler_id")
+  hasUnreadCustomerReply Boolean               @default(true) @map("has_unread_customer_reply")
+  hasUnreadStaffReply    Boolean               @default(false) @map("has_unread_staff_reply")
+  createdAt              DateTime              @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt              DateTime              @updatedAt @map("updated_at") @db.Timestamp(0)
+  resolvedAt             DateTime?             @map("resolved_at") @db.Timestamp(0)
+  closedAt               DateTime?             @map("closed_at") @db.Timestamp(0)
+
+  user            User             @relation("UserTickets", fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "support_tickets_user_fkey")
+  handler         User?            @relation("HandlerTickets", fields: [handlerId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "support_tickets_handler_fkey")
+  category        TicketCategory   @relation(fields: [categoryId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "support_tickets_category_fkey")
+  tenant          Tenant?          @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  loan            Loan?            @relation(fields: [loanId], references: [loanId], onDelete: SetNull)
+  loanApplication LoanApplication? @relation(fields: [loanApplicationId], references: [id], onDelete: SetNull)
+  messages        TicketMessage[]
+
+  @@index([userId], map: "idx_support_tickets_user")
+  @@index([handlerId], map: "idx_support_tickets_handler")
+  @@index([categoryId], map: "idx_support_tickets_category")
+  @@index([status], map: "idx_support_tickets_status")
+  @@index([tenantId], map: "idx_support_tickets_tenant")
+  @@index([loanId], map: "idx_support_tickets_loan")
+  @@index([loanApplicationId], map: "idx_support_tickets_loan_application")
+  @@map("support_tickets")
+}
+
+model TicketMessage {
+  id            Int      @id @default(autoincrement())
+  ticketId      Int      @map("ticket_id")
+  senderId      Int      @map("sender_id")
+  messageText   String   @map("message_text") @db.Text
+  attachmentUrl String?  @map("attachment_url") @db.VarChar(255)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "ticket_messages_ticket_fkey")
+  sender User          @relation(fields: [senderId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "ticket_messages_sender_fkey")
+
+  @@index([ticketId], map: "idx_ticket_messages_ticket")
+  @@index([senderId], map: "idx_ticket_messages_sender")
+  @@map("ticket_messages")
+}
+
+model Gender {
+  genderId Int    @id @default(autoincrement()) @map("gender_id")
+  gender   String @db.VarChar(50)
+  users    User[]
+
+  @@map("genders")
+}
+
+model InterestRate {
+  rateId       Int      @id @default(autoincrement()) @map("rate_id")
+  tenantId     String   @map("tenant_id") @db.VarChar(100)
+  loanTypeId   Int      @map("loan_type_id")
+  numWeeks     Int      @map("num_weeks")
+  activeRate   Int      @map("active_rate")
+  standardRate Int      @map("standard_rate")
+  tenant       Tenant   @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  loanTypes    LoanType @relation(fields: [loanTypeId], references: [loanTypeId], onDelete: NoAction, onUpdate: NoAction, map: "interest_rates_ibfk_1")
+
+  @@index([tenantId], map: "idx_interest_rates_tenant")
+  @@index([loanTypeId], map: "idx_interest_rates_loan_type_id")
+  @@map("interest_rates")
+}
+
+model Promotion {
+  promotionId            Int       @id @default(autoincrement()) @map("promotion_id")
+  tenantId               String    @map("tenant_id") @db.VarChar(100)
+  discount               Int       @map("discount")
+  startDate              DateTime  @map("start_date") @db.Timestamp(0)
+  endDate                DateTime  @map("end_date") @db.Timestamp(0)
+  isActive               Boolean   @default(false) @map("is_active")
+  expiringSoonNotifiedAt DateTime? @map("expiring_soon_notified_at") @db.Timestamp(0)
+  tenant                 Tenant    @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+
+  @@index([tenantId], map: "idx_promotions_tenant")
+  @@index([startDate], map: "idx_promotions_start_date")
+  @@index([endDate], map: "idx_promotions_end_date")
+  @@index([isActive], map: "idx_promotions_is_active")
+  @@map("promotions")
+}
+
+model LoanApplication {
+  id                   Int           @id @default(autoincrement())
+  tenantId             String        @map("tenant_id") @db.VarChar(100)
+  applicantId          Int           @map("applicant_id")
+  loanAmount           Int           @map("loan_amount")
+  collateral           String?       @db.VarChar(200)
+  collateralImageUrl   String?       @map("collateral_image_url") @db.VarChar(400)
+  numWeeks             Int           @map("num_weeks")
+  location             String        @db.VarChar(100)
+  dateApplied          DateTime?     @default(now()) @map("date_applied") @db.Timestamp(0)
+  /// Snapshot of the attached offer's discount value at apply/update time (never trust client input).
+  discount             Int?          @default(0)
+  specialOfferId       Int?          @map("special_offer_id")
+  isReviewed           Boolean       @default(false) @map("is_reviewed")
+  /// Frozen from InterestRate at apply/update — no FK so catalog rows can be deleted/changed safely.
+  loanTypeId           Int?          @map("loan_type_id")
+  /// Catalog activeRate at apply/update time.
+  activeRate           Int?          @map("active_rate")
+  /// Effective rate after offer at apply/update time (used on approve).
+  interestRate         Int?          @map("interest_rate")
+  /// Expected return at apply/update time (used on approve as returnAmount).
+  expectedReturnAmount Int?          @map("expected_return_amount")
+  tenant               Tenant        @relation(fields: [tenantId], references: [tenantId], onDelete: Restrict)
+  users                User          @relation(fields: [applicantId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "loan_applications_ibfk_1")
+  specialOffer         SpecialOffer? @relation(fields: [specialOfferId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "loan_applications_special_offer_fk")
+  supportTickets       SupportTicket[]
+
+  @@index([tenantId], map: "idx_loan_applications_tenant")
+  @@index([applicantId], map: "idx_loan_applications_applicant")
+  @@index([dateApplied], map: "idx_loan_applications_date")
+  @@index([specialOfferId], map: "idx_loan_applications_special_offer")
+  @@index([isReviewed], map: "idx_loan_applications_is_reviewed")
+  @@map("loan_applications")
+}
+
+/// Per-tenant flags for loan-application workflow.
+model LoanApplicationSetting {
+  id                                  Int      @id @default(autoincrement())
+  tenantId                            String   @unique @map("tenant_id") @db.VarChar(100)
+  applicationStatusVisibleToApplicant Boolean  @default(false) @map("application_status_visible_to_applicant")
+  /// Inclusive minimum loan amount a customer may apply for (MWK, whole units).
+  minLoanAmount                       Int      @default(10000) @map("min_loan_amount")
+  /// Inclusive maximum loan amount a customer may apply for (MWK, whole units).
+  maxLoanAmount                       Int      @default(1000000) @map("max_loan_amount")
+  updatedAt                           DateTime @updatedAt @map("updated_at") @db.Timestamp(0)
+  tenant                              Tenant   @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+
+  @@map("loan_application_settings")
+}
+
+model LoanType {
+  loanTypeId    Int            @id @default(autoincrement()) @map("loan_type_id")
+  tenantId      String         @map("tenant_id") @db.VarChar(100)
+  typeName      String         @map("type_name") @db.VarChar(255)
+  tenant        Tenant         @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  interestRates InterestRate[]
+  loans         Loan[]
+
+  @@unique([tenantId, typeName], map: "uq_loan_types_tenant_type_name")
+  @@index([tenantId], map: "idx_loan_types_tenant")
+  @@map("loan_types")
+}
+
+model Loan {
+  loanId             String      @id @map("loan_id") @db.VarChar(100)
+  /// Public lookup ID exposed on APIs — never expose loanId to clients.
+  publicId           String      @unique @default(uuid()) @map("public_id") @db.VarChar(50)
+  tenantId           String      @map("tenant_id") @db.VarChar(100)
+  customerId         Int         @map("customer_id")
+  handlerId          Int         @map("handler_id")
+  loanTypeId         Int         @map("loan_type_id")
+  loanAmount         Int         @map("loan_amount")
+  returnAmount       Int         @map("return_amount")
+  interestRate       Int         @map("interest_rate")
+  numWeeks           Int         @map("num_weeks")
+  startDate          DateTime    @map("start_date") @db.Timestamp(0)
+  endDate            DateTime    @map("end_date") @db.Timestamp(0)
+  status             String      @db.VarChar(50)
+  collateral         String      @db.VarChar(200)
+  /// Copied from the application at approval; not mutable via loan-record update APIs.
+  collateralImageUrl String?     @map("collateral_image_url") @db.VarChar(400)
+  isCleared          Boolean?    @default(false) @map("is_cleared") //backward compatibility with old loans
+  tenant             Tenant      @relation(fields: [tenantId], references: [tenantId], onDelete: Restrict)
+  customer           User        @relation("loans_customer_idTousers", fields: [customerId], references: [id], onDelete: Cascade, map: "loans_ibfk_1")
+  handler            User        @relation("loans_handler_idTousers", fields: [handlerId], references: [id], onDelete: Cascade, map: "loans_ibfk_2")
+  loanTypes          LoanType    @relation(fields: [loanTypeId], references: [loanTypeId], onDelete: Cascade, map: "loans_ibfk_3")
+  repayments         Repayment[]
+  supportTickets     SupportTicket[]
+
+  @@index([publicId], map: "idx_loans_public_id")
+  @@index([tenantId], map: "idx_loans_tenant")
+  @@index([customerId], map: "idx_loans_customer")
+  @@index([endDate], map: "idx_loans_end_date")
+  @@index([handlerId], map: "idx_loans_handler")
+  @@index([isCleared], map: "idx_loans_is_cleared")
+  @@index([status], map: "idx_loans_status")
+  @@index([loanTypeId], map: "idx_loans_loan_type_id")
+  @@map("loans")
+}
+
+model Notification {
+  notificationId   Int      @id @default(autoincrement()) @map("notification_id")
+  notificationType String   @map("notification_type") @db.VarChar(50)
+  targetUser       Int      @map("target_user")
+  content          String?  @db.Text
+  date             DateTime @db.Timestamp(0)
+  isViewed         Boolean? @default(false) @map("is_viewed")
+  user             User     @relation(fields: [targetUser], references: [id], onDelete: Cascade)
+
+  @@index([isViewed], map: "idx_notifications_is_viewed")
+  @@index([notificationType], map: "idx_notifications_notification_type")
+  @@index([targetUser], map: "idx_notifications_target")
+  @@map("notifications")
+}
+
+model RepaymentDetail {
+  repaymentDetailId Int    @id @default(autoincrement()) @map("repayment_detail_id")
+  tenantId          String @map("tenant_id") @db.VarChar(100)
+  paymentModeName   String @map("payment_mode_name") @db.VarChar(100)
+  accountName       String @map("account_name") @db.VarChar(255)
+  accountNumber     String @map("account_number") @db.VarChar(255)
+
+  tenant Tenant @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+
+  @@index([tenantId], map: "idx_repayment_details_tenant")
+  @@map("repayment_details")
+}
+
+model Repayment {
+  repaymentId String   @id @map("repayment_id") @db.VarChar(100)
+  handlerId   Int      @map("handler_id")
+  loanId      String   @map("loan_id") @db.VarChar(100)
+  amountPaid  Int      @map("amount_paid")
+  datePaid    DateTime @map("date_paid") @db.Timestamp(0)
+  loans       Loan     @relation(fields: [loanId], references: [loanId], onDelete: Cascade, map: "repayments_loan_fkey")
+  users       User     @relation(fields: [handlerId], references: [id], onDelete: Cascade, map: "repayments_handler_fkey")
+
+  @@index([datePaid], map: "idx_repayments_date")
+  @@index([handlerId], map: "idx_repayments_handler")
+  @@index([loanId], map: "idx_repayments_loan")
+  @@map("repayments")
+}
+
+model CustomerLoanActivity {
+  id                  Int       @id @default(autoincrement())
+  customerId          Int       @map("customer_id")
+  tenantId            String    @map("tenant_id") @db.VarChar(100)
+  totalApplications   Int       @default(0) @map("total_applications")
+  activeLoansCount    Int       @default(0) @map("active_loans_count")
+  clearedLoansCount   Int       @default(0) @map("cleared_loans_count")
+  rejectedLoansCount  Int       @default(0) @map("rejected_loans_count")
+  defaultedLoansCount Int       @default(0) @map("defaulted_loans_count")
+  overdueClearedCount Int       @default(0) @map("overdue_cleared_count")
+  loansSinceLastOffer Int       @default(0) @map("loans_since_last_offer")
+  lastOfferIssuedAt   DateTime? @map("last_offer_issued_at") @db.Timestamp(0)
+  users               User      @relation(fields: [customerId], references: [id], onDelete: Cascade, map: "customer_loan_activity_ibfk_1")
+  tenant              Tenant    @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+
+  @@unique([customerId, tenantId], map: "uq_customer_loan_activity_customer_tenant")
+  @@index([tenantId], map: "idx_customer_loan_activity_tenant")
+  @@map("customer_loan_activity")
+}
+
+model SpecialOfferConfig {
+  id                  Int          @id @default(autoincrement())
+  tenantId            String       @unique @map("tenant_id") @db.VarChar(100)
+  isEnabled           Boolean      @default(false) @map("is_enabled")
+  loanInterval        Int          @default(6) @map("loan_interval")
+  discountType        DiscountType @default(PERCENTAGE) @map("discount_type")
+  discountValue       Decimal      @default(0) @map("discount_value") @db.Decimal(12, 2)
+  validForDays        Int          @default(30) @map("valid_for_days")
+  allowDefaultedUsers Boolean      @default(true) @map("allow_defaulted_users")
+  updatedAt           DateTime     @updatedAt @map("updated_at") @db.Timestamp(0)
+  tenant              Tenant       @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+
+  @@unique([id, tenantId], map: "uq_special_offer_configs_id_tenant")
+  @@index([tenantId], map: "idx_special_offer_configs_tenant")
+  @@map("special_offer_configs")
+}
+
+model SpecialOffer {
+  id                 Int                @id @default(autoincrement())
+  tenantId           String             @map("tenant_id") @db.VarChar(100)
+  targetCustomer     Int                @map("target_customer")
+  /// Null means the offer was issued by the automated reward engine (not a User row).
+  issuedById         Int?               @map("issued_by_id")
+  discountType       DiscountType       @map("discount_type")
+  discountValue      Decimal            @map("discount_value") @db.Decimal(12, 2)
+  status             SpecialOfferStatus @default(AVAILABLE)
+  isModalDismissed   Boolean            @default(false) @map("is_modal_dismissed")
+  dismissedAt        DateTime?          @map("dismissed_at") @db.Timestamp(0)
+  issuedAt           DateTime           @default(now()) @map("issued_at") @db.Timestamp(0)
+  expiresAt          DateTime           @map("expires_at") @db.Timestamp(0)
+  redeemedAt         DateTime?          @map("redeemed_at") @db.Timestamp(0)
+  redeemedLoanId     String?            @unique(map: "uq_special_offers_redeemed_loan_id") @map("redeemed_loan_id") @db.VarChar(100)
+  issuedReason       String?            @map("issued_reason") @db.VarChar(500)
+  cancelledAt        DateTime?          @map("cancelled_at") @db.Timestamp(0)
+  /// Set only by a human staff cancellation — never by the reward engine.
+  cancelledById      Int?               @map("cancelled_by_id")
+  cancellationReason String?            @map("cancellation_reason") @db.VarChar(500)
+  tenant             Tenant             @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  targetUser         User               @relation("special_offers_target", fields: [targetCustomer], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "special_offers_ibfk_1")
+  issuedBy           User?              @relation("special_offers_issued_by", fields: [issuedById], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "special_offers_issued_by_fk")
+  cancelledBy        User?              @relation("special_offers_cancelled_by", fields: [cancelledById], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "special_offers_cancelled_by_fk")
+  loanApplications   LoanApplication[]
+
+  @@unique([id, tenantId], map: "uq_special_offers_id_tenant")
+  @@index([tenantId], map: "idx_special_offers_tenant")
+  @@index([targetCustomer], map: "idx_special_offers_target_customer")
+  @@index([status], map: "idx_special_offers_status")
+  @@index([expiresAt], map: "idx_special_offers_expires_at")
+  @@index([issuedById], map: "idx_special_offers_issued_by")
+  @@index([cancelledById], map: "idx_special_offers_cancelled_by")
+  @@map("special_offers")
+}
+
+model BrandDetail {
+  id          Int     @id @default(autoincrement())
+  brandName   String? @map("brand_name") @db.VarChar(200)
+  slogan      String? @db.VarChar(250)
+  logoImgName String? @map("logo_img_name") @db.VarChar(400)
+
+  @@map("brand_details")
+}
+
+/// Platform key/value config (e.g. mfa_enabled, online_repayments_enabled,
+/// include_demo_tenants_enabled, tenant_notification_emails_enabled).
+/// Store flags as rows — no dedicated columns.
+model SystemSetting {
+  id    Int    @id @default(autoincrement())
+  key   String @unique @map("key") @db.VarChar(100)
+  value String @db.Text
+
+  @@map("system_settings")
+}
+
+model GlobalAnnouncement {
+  id                     Int                         @id @default(autoincrement())
+  tenantId               String?                     @map("tenant_id") @db.VarChar(100)
+  title                  String                      @db.VarChar(255)
+  content                String                      @db.Text
+  linkUrl                String?                     @map("link_url") @db.VarChar(500)
+  startsAt               DateTime                    @map("starts_at") @db.Timestamp(0)
+  endsAt                 DateTime                    @map("ends_at") @db.Timestamp(0)
+  announcementDismissals UserAnnouncementDismissal[]
+
+  tenant Tenant? @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+
+  @@unique([id, tenantId], map: "uq_global_announcements_id_tenant")
+  @@index([tenantId], map: "idx_global_announcements_tenant")
+  @@index([startsAt], map: "idx_global_announcements_starts_at")
+  @@index([endsAt], map: "idx_global_announcements_ends_at")
+  @@map("global_announcements")
+}
+
+model UserAnnouncementDismissal {
+  userId         Int                @map("user_id")
+  announcementId Int                @map("announcement_id")
+  users          User               @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "user_announcement_dismissals_ibfk_1")
+  announcement   GlobalAnnouncement @relation(fields: [announcementId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "user_announcement_dismissals_ibfk_2")
+
+  @@id([userId, announcementId])
+  @@index([userId], map: "idx_user_announcement_dismissals_user_id")
+  @@index([announcementId], map: "idx_user_announcement_dismissals_announcement_id")
+  @@map("user_announcement_dismissals")
+}
+
+model TermsAndConditions {
+  id            Int                 @id @default(autoincrement())
+  tenantId      String?             @map("tenant_id") @db.VarChar(100)
+  version       String              @db.VarChar(50)
+  title         String              @db.VarChar(255)
+  content       String              @db.Text
+  type          AgreementType
+  status        AgreementStatus     @default(DRAFT)
+  effectiveDate DateTime            @map("effective_date") @db.Timestamp(0)
+  createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt     DateTime            @updatedAt @map("updated_at") @db.Timestamp(0)
+  tenant        Tenant?             @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  acceptances   UserTncAcceptance[]
+
+  @@unique([tenantId, type, version], map: "uq_terms_and_conditions_tenant_type_version")
+  @@index([tenantId, type, status], map: "idx_terms_and_conditions_tenant_type_status")
+  @@index([effectiveDate], map: "idx_terms_and_conditions_effective_date")
+  @@map("terms_and_conditions")
+}
+
+model UserTncAcceptance {
+  id                   Int                @id @default(autoincrement())
+  userId               Int                @map("user_id")
+  termsAndConditionsId Int                @map("terms_and_conditions_id")
+  acceptedAt           DateTime           @default(now()) @map("accepted_at") @db.Timestamp(0)
+  ipAddress            String?            @map("ip_address") @db.VarChar(45)
+  users                User               @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "user_tnc_acceptance_ibfk_1")
+  termsAndConditions   TermsAndConditions @relation(fields: [termsAndConditionsId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "user_tnc_acceptance_tnc_fkey")
+
+  @@unique([userId, termsAndConditionsId], map: "uq_user_tnc_acceptance_user_version")
+  @@index([userId], map: "idx_user_tnc_acceptance_user_id")
+  @@index([termsAndConditionsId], map: "idx_user_tnc_acceptance_tnc_id")
+  @@map("user_tnc_acceptance")
+}
+
+model Account {
+  id                String   @id @default(uuid())
+  userId            Int      @map("user_id")
+  provider          String   @db.VarChar(50)
+  providerAccountId String   @map("provider_account_id") @db.VarChar(255)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("user_accounts")
+}
+
+model User {
+  id                         Int                         @id @default(autoincrement())
+  /// Public login handle — unique and mutable. Relations must use `id`, never this field.
+  userId                     String                      @unique @map("user_id") @db.VarChar(100)
+  password                   String?                     @db.VarChar(500)
+  fullname                   String                      @db.VarChar(100)
+  genderId                   Int?                        @map("gender_id")
+  nationalId                 String                      @map("national_id") @db.VarChar(255)
+  phone                      String?                     @db.VarChar(14)
+  email                      String?                     @unique @db.VarChar(100)
+  /// Operational hold only (loans, savings, approvals, etc.). Does NOT revoke login or session access.
+  isBlocked                  Boolean?                    @default(false) @map("is_blocked")
+  isMfaEnabled               Boolean                     @default(false) @map("is_mfa_enabled")
+  /// Soft-delete. JWT/session rejected until an administrator restores the account.
+  deletedAt                  DateTime?                   @map("deleted_at") @db.Timestamp(0)
+  avatarUrl                  String?                     @map("avatar_url") @db.VarChar(255)
+  districtId                 Int?                        @map("district_id")
+  sessionState               Json?                       @map("session_state")
+  /// Bumped on password set/reset to invalidate outstanding account-access JWTs
+  credentialsVersion         Int                         @default(0) @map("credentials_version")
+  passwordResetPin           String?                     @map("password_reset_pin") @db.VarChar(100)
+  passwordResetExpires       DateTime?                   @map("password_reset_expires") @db.Timestamp(0)
+  passwordResetCount         Int                         @default(0) @map("password_reset_count")
+  /// NULL = platform user; populated = exclusive membership of that tenant.
+  tenantId                   String?                     @map("tenant_id") @db.VarChar(100)
+  userRoles                  UserRole[]
+  identityDocuments          IdentityDocument[]
+  savingsApplicationActivity SavingsApplicationActivity?
+  userTickets                SupportTicket[]             @relation("UserTickets")
+  handlerTickets             SupportTicket[]             @relation("HandlerTickets")
+  ticketMessages             TicketMessage[]
+  loanApplications           LoanApplication[]
+  loansTaken                 Loan[]                      @relation("loans_customer_idTousers")
+  loansProcessed             Loan[]                      @relation("loans_handler_idTousers")
+  repayments                 Repayment[]
+  specialOffersReceived      SpecialOffer[]              @relation("special_offers_target")
+  specialOffersIssued        SpecialOffer[]              @relation("special_offers_issued_by")
+  specialOffersCancelled     SpecialOffer[]              @relation("special_offers_cancelled_by")
+  customerLoanActivities     CustomerLoanActivity[]
+  userTncAcceptance          UserTncAcceptance[]
+  accounts                   Account[]
+  announcementDismissals     UserAnnouncementDismissal[]
+  approvalRequestsRequested     ApprovalRequest[]           @relation("RequestedBy")
+  approvalRequestsReviewed      ApprovalRequest[]           @relation("ReviewedBy")
+  onboardingRequestsSubmitted   BrandOnboardingRequest[]    @relation("OnboardingRequestsSubmitted")
+  onboardingRequestsReviewed    BrandOnboardingRequest[]    @relation("OnboardingRequestsReviewed")
+  customerFavorites             CustomerFavoriteTenant[]
+  notifications                 Notification[]
+  auditLogs                     AuditLog[]
+  initiatedPaymentTransactions  PaymentTransaction[]
+  tenant                     Tenant?                     @relation(fields: [tenantId], references: [tenantId], onDelete: Restrict)
+  districts                  District?                   @relation(fields: [districtId], references: [id], map: "fk_users_district")
+  genders                    Gender?                     @relation(fields: [genderId], references: [genderId], onDelete: NoAction, onUpdate: NoAction, map: "users_ibfk_1")
+
+  @@index([genderId], map: "gender_id")
+  @@index([districtId], map: "idx_users_district")
+  @@index([phone], map: "idx_users_phone")
+  @@index([tenantId], map: "idx_users_tenant")
+  @@map("users")
+}
+
+/// Internal tenant PK (tenantId) is for joins only — never expose it as tenantId on public APIs.
+/// Public lookup uses uuid (same value as tenantId), tenantCode, or slug.
+model Tenant {
+  tenantId           String             @id @default(uuid()) @map("tenant_id") @db.VarChar(100)
+  tenantCode         String             @unique @map("tenant_code") @db.VarChar(20)
+  slug               String             @unique @db.VarChar(100)
+  name               String             @db.VarChar(255)
+  logoUrl            String?            @map("logo_url") @db.VarChar(500)
+  brandColor         String?            @default("#1E3A8A") @map("brand_color") @db.VarChar(20)
+  isActive           Boolean            @default(true) @map("is_active")
+  /// Demo institutions for walkthroughs; excluded from public catalog and platform stats.
+  isDemo             Boolean            @default(false) @map("is_demo")
+  subscriptionStatus SubscriptionStatus @default(TRIAL) @map("subscription_status")
+  trialEndsAt        DateTime?          @map("trial_ends_at") @db.Timestamp(0)
+  /// Furthest paid coverage end. Compared in memory on each tenant request. Null when no paid window is open.
+  subscriptionAccessEndsAt DateTime? @map("subscription_access_ends_at") @db.Timestamp(0)
+  paymentStatus      PaymentStatus      @default(PENDING) @map("payment_status")
+  /// Last plan the tenant chose. Renewal opens here; the catalog is only for a change.
+  currentPlanId      Int?               @map("current_plan_id")
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamp(0)
+  deletedAt          DateTime?          @map("deleted_at") @db.Timestamp(0)
+
+  roles                  Role[]
+  users                  User[]
+  userRoles              UserRole[]
+  auditLogs              AuditLog[]
+  approvalRequests       ApprovalRequest[]
+  brandProfile           TenantBrandProfile?
+  termsAndConditions     TermsAndConditions[]
+  loanApplicationSetting LoanApplicationSetting?
+  loanTypes              LoanType[]
+  interestRates          InterestRate[]
+  promotions             Promotion[]
+  specialOfferConfigs    SpecialOfferConfig[]
+  specialOffers          SpecialOffer[]
+  loanApplications       LoanApplication[]
+  loans                  Loan[]
+  customerLoanActivities CustomerLoanActivity[]
+  adverts                Advert[]
+  announcements          GlobalAnnouncement[]
+  brandShowcases         BrandShowcase[]
+  repaymentDetails       RepaymentDetail[]
+  customerFavorites      CustomerFavoriteTenant[]
+  supportTickets         SupportTicket[]
+  loanApplicationEligibility TenantLoanApplicationEligibility?
+  subscriptions          Subscription[]
+  paymentTransactions    PaymentTransaction[]
+  notificationConfigs    NotificationConfig[]
+  currentPlan            SubscriptionPlan? @relation(fields: [currentPlanId], references: [id], onDelete: SetNull)
+
+  @@index([tenantCode], map: "idx_tenants_code")
+  @@index([slug], map: "idx_tenants_slug")
+  @@index([currentPlanId], map: "idx_tenants_current_plan")
+  @@map("tenants")
+}
+
+/// Platform customer ↔ institution favorites (customerId is always a platform user).
+model CustomerFavoriteTenant {
+  favoriteId String   @id @default(uuid()) @map("favorite_id") @db.VarChar(100)
+  customerId Int      @map("customer_id")
+  tenantId   String   @map("tenant_id") @db.VarChar(100)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+
+  customer User   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  tenant   Tenant @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+
+  @@unique([customerId, tenantId], name: "unique_customer_favorite_tenant")
+  @@index([customerId], map: "idx_customer_favorite_tenants_customer")
+  @@index([tenantId], map: "idx_customer_favorite_tenants_tenant")
+  @@map("customer_favorite_tenants")
+}
+
+model TenantBrandProfile {
+  id            Int      @id @default(autoincrement())
+  tenantId      String   @unique @map("tenant_id") @db.VarChar(100)
+  brandName     String?  @map("brand_name") @db.VarChar(200)
+  slogan        String?  @db.VarChar(250)
+  /// Relative public path from ImageStorageService (same pattern as BrandDetail.logoImgName).
+  logoImgName   String?  @map("logo_img_name") @db.VarChar(400)
+  brandMission  String?  @map("brand_mission") @db.VarChar(1000)
+  brandVision   String?  @map("brand_vision") @db.VarChar(1000)
+  contactPhone  String?  @map("contact_phone") @db.VarChar(20)
+  whatsappPhone String?  @map("whatsapp_phone") @db.VarChar(20)
+  contactEmail  String?  @map("contact_email") @db.VarChar(256)
+  coreValues    String?  @map("core_values") @db.VarChar(800)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  tenant Tenant @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+
+  @@map("tenant_brand_profiles")
+}
+
+/// Derived snapshot: can this institution accept loan applications?
+/// Internal tenantId is join-only. Reads use uuid/slug/tenantCode on APIs.
+model TenantLoanApplicationEligibility {
+  tenantId          String   @id @map("tenant_id") @db.VarChar(100)
+  status            String   @map("status") @db.VarChar(20)
+  isEligible        Boolean  @map("is_eligible")
+  hasInterestRates  Boolean  @map("has_interest_rates")
+  hasBrandProfile   Boolean  @map("has_brand_profile")
+  hasTermsOfService Boolean  @map("has_terms_of_service")
+  hasPrivacyPolicy  Boolean  @map("has_privacy_policy")
+  /// Reserved for plan/billing. Null until subscription checks are wired.
+  subscription      Json?
+  computedAt        DateTime @map("computed_at") @db.Timestamp(0)
+
+  tenant Tenant @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+
+  @@map("tenant_loan_application_eligibility")
+}
+
+/// Platform change-approval queue. Internal `id` is never exposed — use publicId.
+model ApprovalRequest {
+  id              BigInt                @id @default(autoincrement())
+  publicId        String                @unique @default(uuid()) @map("public_id") @db.VarChar(100)
+  tenantId        String                @map("tenant_id") @db.VarChar(100)
+  requestedById   Int                   @map("requested_by_id")
+  reviewedById    Int?                  @map("reviewed_by_id")
+  entityType      ApprovalEntityType    @map("entity_type")
+  payload         Json
+  previousData    Json?                 @map("previous_data")
+  reason          String?               @db.Text
+  rejectionReason String?               @map("rejection_reason") @db.Text
+  status          ApprovalRequestStatus @default(PENDING)
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt       DateTime              @updatedAt @map("updated_at") @db.Timestamp(0)
+  reviewedAt      DateTime?             @map("reviewed_at") @db.Timestamp(0)
+
+  tenant      Tenant @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  requestedBy User   @relation("RequestedBy", fields: [requestedById], references: [id])
+  reviewedBy  User?  @relation("ReviewedBy", fields: [reviewedById], references: [id])
+
+  @@index([tenantId, status], map: "idx_approval_tenant_status")
+  @@index([publicId], map: "idx_approval_requests_public_id")
+  @@map("approval_requests")
+}
+
+/// Customer-submitted brand workspace application. Internal `id` is never exposed — use publicId.
+model BrandOnboardingRequest {
+  id              Int                     @id @default(autoincrement())
+  publicId        String                  @unique @default(uuid()) @map("public_id") @db.VarChar(100)
+  requestedById   Int                     @map("requested_by_id")
+  brandName       String                  @map("brand_name") @db.VarChar(200)
+  slug            String                  @db.VarChar(100)
+  tenantCode      String                  @map("tenant_code") @db.VarChar(20)
+  contactPhone    String?                 @map("contact_phone") @db.VarChar(20)
+  contactEmail    String                  @map("contact_email") @db.VarChar(256)
+  status          OnboardingRequestStatus @default(PENDING)
+  rejectionReason String?                 @map("rejection_reason") @db.Text
+  reviewedById    Int?                    @map("reviewed_by_id")
+  createdTenantId String?                 @map("created_tenant_id") @db.VarChar(100)
+  createdAt       DateTime                @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt       DateTime                @updatedAt @map("updated_at") @db.Timestamp(0)
+  reviewedAt      DateTime?               @map("reviewed_at") @db.Timestamp(0)
+
+  requestedBy     User                    @relation("OnboardingRequestsSubmitted", fields: [requestedById], references: [id], onDelete: Cascade)
+  reviewedBy      User?                   @relation("OnboardingRequestsReviewed", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([status], map: "idx_brand_onboarding_status")
+  @@index([requestedById], map: "idx_brand_onboarding_requested_by")
+  @@index([slug], map: "idx_brand_onboarding_slug")
+  @@index([tenantCode], map: "idx_brand_onboarding_tenant_code")
+  @@map("brand_onboarding_requests")
+}
+
+model Role {
+  roleId      Int     @id @default(autoincrement()) @map("role_id")
+  /// Public API identifier — never expose roleId.
+  publicId    String  @unique @default(uuid()) @map("public_id") @db.VarChar(100)
+  /// NULL = Platform-Level Role; populated = Tenant-Scoped Role
+  tenantId    String? @map("tenant_id") @db.VarChar(100)
+  key         String  @db.VarChar(100)
+  name        String  @db.VarChar(100)
+  description String? @db.VarChar(255)
+
+  tenant                  Tenant?                  @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  userRoles               UserRole[]
+  rolePermissions         RolePermission[]
+  notificationConfigRoles NotificationConfigRole[]
+
+  @@unique([tenantId, key], map: "uq_roles_tenant_key")
+  @@index([tenantId], map: "idx_roles_tenant")
+  @@index([publicId], map: "idx_roles_public_id")
+  @@map("roles")
+}
+
+model UserRole {
+  userId   Int     @map("user_id")
+  roleId   Int     @map("role_id")
+  /// NULL for Platform users; populated for Tenant Staff/Admins
+  tenantId String? @map("tenant_id") @db.VarChar(100)
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role    @relation(fields: [roleId], references: [roleId], onDelete: Cascade)
+  tenant Tenant? @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@index([tenantId], map: "idx_user_roles_tenant")
+  @@map("user_roles")
+}
+
+model Permission {
+  permissionId Int     @id @default(autoincrement()) @map("permission_id")
+  /// e.g. 'platform:roles:manage' or 'tenant:roles:read' — public API identifier
+  name         String  @unique @db.VarChar(100)
+  description  String? @db.VarChar(255)
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       Int @map("role_id")
+  permissionId Int @map("permission_id")
+
+  role       Role       @relation(fields: [roleId], references: [roleId], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [permissionId], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+enum SavingsAuditsAction {
+  decline_application
+  approve_application
+  process_withdrawal
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
+enum SpecialOfferStatus {
+  AVAILABLE
+  /// Attached to an open loan application; not attachable elsewhere until released or redeemed.
+  RESERVED
+  REDEEMED
+  EXPIRED
+  CANCELLED
+}
+
+enum AdvertStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+  EXPIRED
+}
+
+enum AgreementType {
+  TERMS_OF_SERVICE
+  PRIVACY_POLICY
+}
+
+enum AgreementStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  HELD
+}
+
+enum SupportTicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+/// Whether a category opens a platform ticket or an institution-targeted ticket.
+enum TicketCategoryScope {
+  PLATFORM
+  TENANT
+}
+
+enum AdvertPlacement {
+  PUBLIC_PORTAL
+  DASHBOARD
+  ALL
+}
+
+enum AssetCategory {
+  OFFICE_BRANCH
+  TEAM_MEMBER
+  ACHIEVEMENT
+  EVENT
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  PAID
+  EXPIRED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+}
+
+enum SubscriptionBillingCycle {
+  MONTHLY
+  SEMI_ANNUAL
+  ANNUAL
+}
+
+enum SubscriptionType {
+  TRIAL
+  PAID
+}
+
+enum PaymentMethod {
+  ONLINE
+  ELECTRONIC_FUNDS_TRANSFER
+  MANUAL_CASH
+}
+
+enum PaymentProvider {
+  PAYCHANGU
+}
+
+enum PaymentTransactionStatus {
+  PENDING
+  PROCESSING
+  SUCCESS
+  FAILED
+  CANCELLED
+  EXPIRED
+}
+
+enum ApprovalRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum OnboardingRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum ApprovalEntityType {
+  TENANT_PROFILE
+  TENANT_SLUG
+  TENANT_NAME
+  BRAND_ONBOARDING
+}
+
+/// NULL tenantId = platform config; populated = that tenant's config.
+model NotificationConfig {
+  configId    Int                      @id @default(autoincrement()) @map("config_id")
+  /// NULL = platform-scoped action; populated = tenant-scoped action.
+  tenantId    String?                  @map("tenant_id") @db.VarChar(100)
+  actionKey   String                   @map("action_key") @db.VarChar(100)
+  description String?                  @map("description") @db.VarChar(255)
+  roles       NotificationConfigRole[]
+  createdAt   DateTime                 @default(now()) @map("created_at") @db.Timestamp(0)
+  updatedAt   DateTime                 @updatedAt @map("updated_at") @db.Timestamp(0)
+
+  tenant Tenant? @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+
+  @@unique([tenantId, actionKey], map: "uq_notification_configs_tenant_action")
+  @@index([tenantId], map: "idx_notification_configs_tenant")
+  @@map("notification_configs")
+}
+
+model NotificationConfigRole {
+  configId Int                @map("config_id")
+  roleId   Int                @map("role_id")
+  config   NotificationConfig @relation(fields: [configId], references: [configId], onDelete: Cascade)
+  role     Role               @relation(fields: [roleId], references: [roleId], onDelete: Cascade)
+
+  @@id([configId, roleId])
+  @@map("notification_config_roles")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  /// Target tenant (NULL when the action is platform-wide)
+  tenantId   String?  @map("tenant_id") @db.VarChar(100)
+  userId     Int?     @map("user_id")
+  userEmail  String?  @map("user_email") @db.VarChar(100)
+  ipAddress  String?  @map("ip_address") @db.VarChar(45)
+  userAgent  String?  @map("user_agent") @db.VarChar(512)
+  module     String   @db.VarChar(50)
+  action     String   @db.VarChar(100)
+  targetId   String?  @map("target_id") @db.VarChar(100)
+  targetType String?  @map("target_type") @db.VarChar(50)
+  payload    Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+
+  tenant Tenant? @relation(fields: [tenantId], references: [tenantId], onDelete: SetNull)
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId], map: "idx_audit_logs_tenant")
+  @@index([userId], map: "idx_audit_logs_user_id")
+  @@index([action], map: "idx_audit_logs_action")
+  @@index([targetId, targetType], map: "idx_audit_logs_target")
+  @@map("audit_logs")
+}
+
+/// Standard Catalog for platform subscription pricing & durations.
+model SubscriptionPlan {
+  id             Int                      @id @default(autoincrement())
+  name           String                   @db.VarChar(100)
+  billingCycle   SubscriptionBillingCycle @map("billing_cycle")
+  durationInDays Int                      @map("duration_in_days")
+  price          Decimal                  @db.Decimal(12, 2)
+  isActive       Boolean                  @default(true) @map("is_active")
+  createdAt      DateTime                 @default(now()) @map("created_at") @db.Timestamp(0)
+
+  subscriptions Subscription[]
+  tenants       Tenant[]
+  discounts     PlanDiscount[]
+
+  @@map("subscription_plans")
+}
+
+/// Scheduled promotional discounts tied to a subscription plan.
+model PlanDiscount {
+  id           Int          @id @default(autoincrement())
+  planId       Int          @map("plan_id")
+  /// Private coupon. Redeemed at checkout. Hidden from the tenant plan catalog.
+  code         String?      @db.VarChar(50)
+  discountType DiscountType @default(PERCENTAGE) @map("discount_type")
+  /// Whole number: 10 means 10 percent, or 15000 means 15,000 MWK off.
+  value        Int
+  startsAt     DateTime     @map("starts_at") @db.Timestamp(0)
+  endsAt       DateTime     @map("ends_at") @db.Timestamp(0)
+  isActive     Boolean      @default(true) @map("is_active")
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamp(0)
+
+  plan SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId, isActive], map: "idx_plan_discounts_plan_active")
+  @@index([startsAt, endsAt], map: "idx_plan_discounts_dates")
+  @@map("plan_discounts")
+}
+
+/// Canonical Historical Receipt (The "Final Boss").
+/// Captures every completed access grant with exact pricing, plan, time range, and high-level payment method.
+model Subscription {
+  id       String           @id @default(uuid()) @map("subscription_id") @db.VarChar(100)
+  tenantId String           @map("tenant_id") @db.VarChar(100)
+  planId   Int?             @map("plan_id")
+  type     SubscriptionType @default(PAID)
+
+  /// Financial Snapshot
+  amountPaid    Decimal        @map("amount_paid") @db.Decimal(12, 2)
+  paymentMethod PaymentMethod? @map("payment_method")
+
+  /// Coverage Timeframe
+  startsAt DateTime @map("starts_at") @db.Timestamp(0)
+  endsAt   DateTime @map("ends_at") @db.Timestamp(0)
+
+  /// Traceability / Audit Links
+  paymentTransactionId String? @unique @map("payment_transaction_id") @db.Uuid
+  recordedById         String? @map("recorded_by_id") @db.VarChar(100)
+  notes                String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+
+  tenant             Tenant              @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  plan               SubscriptionPlan?   @relation(fields: [planId], references: [id], onDelete: SetNull)
+  paymentTransaction PaymentTransaction? @relation(fields: [paymentTransactionId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId], map: "idx_subscriptions_tenant")
+  @@index([endsAt], map: "idx_subscriptions_ends_at")
+  @@map("subscriptions")
+}
+
+/// Transient Gateway Execution Flow.
+/// Details gateway integration specific details before creating a Subscription.
+model PaymentTransaction {
+  id                    String                   @id @default(uuid()) @db.Uuid
+  transactionReference  String                   @unique @map("transaction_reference") @db.VarChar(100)
+  tenantId              String                   @map("tenant_id") @db.VarChar(100)
+  planId                Int                      @map("plan_id")
+  /// Plan length captured at checkout. Settlement uses this, not a later catalog edit.
+  durationInDays        Int                      @map("duration_in_days")
+  /// User who started checkout. Webhook settlement audits this actor.
+  initiatedById         Int?                     @map("initiated_by_id")
+  amount                Decimal                  @db.Decimal(12, 2)
+  currency              String                   @default("MWK") @db.VarChar(3)
+  provider              PaymentProvider          @default(PAYCHANGU)
+  providerTransactionId String?                  @map("provider_transaction_id") @db.VarChar(255)
+  status                PaymentTransactionStatus @default(PENDING)
+  checkoutUrl           String?                  @map("checkout_url") @db.VarChar(2000)
+
+  initiatedAt   DateTime  @default(now()) @map("initiated_at") @db.Timestamp(0)
+  completedAt   DateTime? @map("completed_at") @db.Timestamp(0)
+  failedAt      DateTime? @map("failed_at") @db.Timestamp(0)
+  failureReason String?   @map("failure_reason") @db.Text
+  metadata      Json?
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
+  initiatedBy  User?         @relation(fields: [initiatedById], references: [id], onDelete: SetNull)
+  subscription Subscription?
+
+  @@index([tenantId], map: "idx_payment_transactions_tenant")
+  @@index([status], map: "idx_payment_transactions_status")
+  @@index([initiatedById], map: "idx_payment_transactions_initiated_by")
+  @@map("payment_transactions")
+}
+
+/// Permanent sandbox administrator for one demo institution.
+/// `tenantId` references tenants.tenant_id. `userId` references users.id.
+/// Kept as plain columns so User and Tenant are not modified.
+model DemoUser {
+  id        String   @id @default(uuid()) @db.VarChar(100)
+  tenantId  String   @unique @map("tenant_id") @db.VarChar(100)
+  userId    Int      @unique @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+
+  @@map("demo_users")
+}
+
+/// One authenticated sandbox visit. A demo institution's user may have many.
+/// `userId` references users.id. `tenantId` references tenants.tenant_id.
+model DemoSession {
+  id               String   @id @default(uuid()) @db.VarChar(100)
+  userId           Int      @map("user_id")
+  tenantId         String   @map("tenant_id") @db.VarChar(100)
+  refreshTokenHash String   @unique @default(uuid()) @map("refresh_token_hash") @db.VarChar(64)
+  expiresAt        DateTime @map("expires_at") @db.Timestamp(0)
+  lastActivityAt   DateTime @default(now()) @map("last_activity_at") @db.Timestamp(0)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamp(0)
+
+  @@index([userId], map: "idx_demo_sessions_user")
+  @@index([tenantId], map: "idx_demo_sessions_tenant")
+  @@index([expiresAt], map: "idx_demo_sessions_expires_at")
+  @@map("demo_sessions")
+}
